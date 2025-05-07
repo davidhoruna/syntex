@@ -3,6 +3,44 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 
+// Helper function that attempts to robustly sanitize the JSON string
+function robustSanitizeJson(input: string): string {
+    let sanitized = input;
+    // Initial regex: escape backslashes that are not followed by a valid escape character
+    sanitized = sanitized.replace(/\\(?!["\\\/bfnrt])/g, '\\\\');
+    console.debug("After initial sanitization:", sanitized);
+    
+    try {
+        JSON.parse(sanitized);
+        return sanitized;
+    } catch (firstError: any) {
+        console.warn("Initial sanitization failed:", firstError.message);
+        // Collapse multiple backslashes to two (this may help if over-escaped)
+        sanitized = sanitized.replace(/\\\\+/g, '\\\\');
+        console.debug("After collapsing multiple backslashes:", sanitized);
+        
+        try {
+            JSON.parse(sanitized);
+            return sanitized;
+        } catch (secondError: any) {
+            console.error("Second sanitization attempt failed:", secondError.message);
+            // Iteratively re-apply the regex a few times as a last attempt
+            for (let i = 0; i < 3; i++) {
+                sanitized = sanitized.replace(/\\(?!["\\\/bfnrt])/g, '\\\\');
+                console.debug(`After iterative sanitization pass ${i + 1}:`, sanitized);
+                try {
+                    JSON.parse(sanitized);
+                    return sanitized;
+                } catch (iterError: any) {
+                    console.warn(`Pass ${i + 1} still failing:`, iterError.message);
+                }
+            }
+            console.error("Robust sanitization failed. Final sanitized JSON:", sanitized);
+            return sanitized; // Let the caller handle the parsing error
+        }
+    }
+}
+
 export async function generateQuestion(topic: string) {
   try {
     const prompt = `
@@ -38,8 +76,15 @@ Ensure the JSON is valid and can be parsed.
       jsonText = codeBlockMatch[1].trim()
     }
 
-    // Sanitize JSON by escaping backslashes that could cause issues
-    const safeJsonText = jsonText.replace(/\\(?!["\\\/bfnrt])/g, '\\\\');
+    // Debug: Log the original JSON text
+    console.debug("Original JSON text:", jsonText)
+
+    // Apply robust sanitization before parsing
+    const safeJsonText = robustSanitizeJson(jsonText);
+
+    // Debug: Log the final safe JSON text
+    console.debug("Final Safe JSON text:", safeJsonText)
+
     const questionData = JSON.parse(safeJsonText)
     return questionData
   } catch (error) {
