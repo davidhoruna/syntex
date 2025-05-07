@@ -12,7 +12,7 @@ export default function Home() {
     redirect(`/learn/${encodeURIComponent(topic)}`)
   }
 
-  const suggestedTopics = ["Algebra Basics", "Calculus Derivatives", "Probability", "Geometry", "Linear Algebra"]
+  const suggestedTopics = ["Integrals", "Calculus Derivatives", "Probability", "Geometry", "Linear Algebra"]
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 bg-black text-white">
@@ -60,6 +60,9 @@ export default function Home() {
           </div>
         </CardFooter>
       </Card>
+      <footer className="mt-4 text-center text-sm text-zinc-400">
+        By David Huaman
+      </footer>
     </main>
   )
 }
