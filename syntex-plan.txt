@@ -1,0 +1,79 @@
+# SYNTEX PROJECT PLAN
+
+## OVERVIEW
+Split Syntex into two main sections:
+1. MATH - Interactive math learning with topic management
+2. READ - PDF upload, dynamic summaries, and audio playback
+
+## ARCHITECTURE
+
+### Shared Components
+- Navigation between Math and Read sections
+- Dark theme UI with minimalist design
+- User authentication (optional)
+
+### Math Section
+- Topic management (add/remove topics)
+- Difficulty selection
+- Question generation with AI
+- Progress tracking
+
+### Read Section
+- File upload system for PDFs
+- Text extraction from PDFs
+- AI-powered summary generation
+- Vertical scrolling summary interface (reel-style)
+- Text-to-speech functionality
+
+## IMPLEMENTATION STEPS
+
+1. REFACTOR CURRENT APP
+   - Move existing math functionality to /math route
+   - Create shared layout with navigation
+   - Implement topic management system
+
+2. BUILD READ SECTION
+   - Create /read route with file upload interface
+   - Implement PDF parsing and text extraction
+   - Add AI summary generation using AI SDK
+   - Build vertical scrolling summary interface
+   - Integrate text-to-speech functionality
+
+3. FILE STRUCTURE
+   /app
+     /layout.tsx (main navigation)
+     /page.tsx (landing page)
+     /math
+       /page.tsx (topic selection)
+       /[topic]/page.tsx (questions)
+     /read
+       /page.tsx (file upload)
+       /[fileId]/page.tsx (summary view)
+
+4. DATA MODELS
+   - Topics: {id, name, difficulty, progress}
+   - Files: {id, name, type, uploadDate}
+   - Summaries: {id, fileId, content, audioUrl}
+
+5. KEY FEATURES
+   - Math: Topic management, question generation, progress tracking
+   - Read: PDF upload, text extraction, summary generation, TTS
+
+6. TECH STACK
+   - Next.js App Router
+   - React Server Components
+   - AI SDK for OpenAI integration
+   - PDF.js for PDF parsing
+   - Web Speech API for text-to-speech
+   - Supabase for storage (optional)
+
+## IMPLEMENTATION PRIORITIES
+1. Refactor current app into Math section
+2. Add topic management to Math section
+3. Create basic Read section with file upload
+4. Implement PDF parsing and text extraction
+5. Add AI summary generation
+6. Build vertical scrolling interface
+7. Integrate text-to-speech functionality
+
+Keep all implementations as simple as possible while maintaining functionality.

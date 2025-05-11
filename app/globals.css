@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Import KaTeX fonts for LaTeX-style typography */
+@import 'katex/dist/katex.min.css';
+
+/* Apply LaTeX-style typography throughout the application */
+body {
+  font-family: 'KaTeX_Main', serif;
+  font-feature-settings: "kern", "liga", "clig", "calt";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings with LaTeX styling */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'KaTeX_Main', serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Paragraphs with proper LaTeX-like spacing */
+p {
+  font-family: 'KaTeX_Main', serif;
+  line-height: 1.5;
+}
+
+/* Code blocks with monospace font */
+code, pre {
+  font-family: 'KaTeX_Typewriter', monospace;
+}
+
+/* Math symbols and LaTeX-style typography */
+.font-math {
+  font-family: 'KaTeX_Math', serif;
+  font-style: italic;
+}
+
+/* Button and interactive elements with sans-serif for better readability */
+button, input, select, a.btn {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* KaTeX display styles */
+.math-content .katex-display {
+  margin: 0.5rem 0;
+  overflow-x: auto;
+}
+
+:root {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 100%;
+  --card: 0 0% 4%;
+  --card-foreground: 0 0% 100%;
+  --popover: 0 0% 4%;
+  --popover-foreground: 0 0% 100%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.9%;
+}
+
+body {
+  @apply bg-background text-foreground;
+}
+
+.math-content .katex-display {
+  @apply my-2 overflow-x-auto;
+}
