@@ -116,22 +116,31 @@ const FolderItem = memo(function FolderItem({
   onDelete: (id: string, e: React.MouseEvent) => void
 }) {
   return (
-    <Link href={`/math/folder/${folder.id}`}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer h-full group">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex items-center">
-            <Folder className="h-5 w-5 mr-2 text-zinc-400 group-hover:text-white transition-colors" />
-            <h3 className="text-lg font-medium">{folder.name}</h3>
+    <div className="relative h-full">
+      {/* Make the entire card clickable */}
+      <Link 
+        href={`/math/folder/${folder.id}`}
+        className="block h-full"
+      >
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer h-full group">
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex items-center">
+              <Folder className="h-5 w-5 mr-2 text-zinc-400 group-hover:text-white transition-colors" />
+              <h3 className="text-lg font-medium group-hover:text-white transition-colors">{folder.name}</h3>
+            </div>
+            {/* Button positioned on top of the link for proper event handling */}
+            <div className="relative z-10">
+              <button
+                className="text-zinc-400 hover:text-red-400 p-1 rounded-full hover:bg-zinc-700"
+                onClick={(e) => onDelete(folder.id, e)}
+                aria-label={`Delete ${folder.name}`}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <button
-            className="text-zinc-400 hover:text-red-400 p-1 rounded-full hover:bg-zinc-700"
-            onClick={(e) => onDelete(folder.id, e)}
-            aria-label={`Delete ${folder.name}`}
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
         </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   )
 })

@@ -48,15 +48,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Get the current hostname - works in both localhost and production deployments
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
       
       // Log auth attempt for debugging
       console.log(`Starting GitHub auth from origin: ${origin}`);
       
+      // Get the correct site URL based on environment
+      // For Vercel deployment, we need to use the actual deployed URL, not localhost
+      const redirectUrl = isLocalhost 
+        ? `${origin}/auth/callback` 
+        : `${process.env.NEXT_PUBLIC_SITE_URL || origin}/auth/callback`;
+      
+      console.log(`Using redirect URL: ${redirectUrl}`);
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
-          redirectTo: `${origin}/auth/callback`,
-          // Prevent the redirectTo from defaulting to localhost in production
+          redirectTo: redirectUrl,
+          // Make sure we don't skip the browser redirect
           skipBrowserRedirect: false,
         },
       })

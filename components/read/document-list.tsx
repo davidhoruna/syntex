@@ -127,45 +127,51 @@ const DocumentItem = memo(function DocumentItem({
   };
   
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center">
-          <FileText className="h-5 w-5 mr-3 text-zinc-400 flex-shrink-0" />
-          <div className="min-w-0">
-            <h3 className="font-medium text-white truncate">{document.name}</h3>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                {document.type.toUpperCase()}
-              </span>
-              <span className="text-xs text-zinc-500">{formatFileSize(document.size)}</span>
-              <span className="text-xs text-zinc-500">
-                {new Date(document.created_at).toLocaleDateString()}
-              </span>
+    <div className="relative group">
+      {/* Make the entire document clickable */}
+      <Link 
+        href={`/read/document/${document.id}`}
+        className="block"
+      >
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <FileText className="h-5 w-5 mr-3 text-zinc-400 group-hover:text-white flex-shrink-0 transition-colors" />
+              <div className="min-w-0">
+                <h3 className="font-medium text-white truncate">{document.name}</h3>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                    {document.type.toUpperCase()}
+                  </span>
+                  <span className="text-xs text-zinc-500">{formatFileSize(document.size)}</span>
+                  <span className="text-xs text-zinc-500">
+                    {new Date(document.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {/* Delete button with higher z-index to appear above the link */}
+            <div className="flex items-center gap-2 ml-2 flex-shrink-0 relative z-10">
+              <button
+                className="text-zinc-400 hover:text-red-400 p-1 rounded-full hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={(e) => {
+                  e.preventDefault(); // Prevent navigation
+                  e.stopPropagation(); // Stop event bubbling
+                  onRemove(document.id);
+                }}
+                disabled={isDeleting}
+                aria-label={`Remove ${document.name}`}
+              >
+                {isDeleting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </button>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-          <button
-            className="text-zinc-400 hover:text-red-400 p-1 rounded-full hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => onRemove(document.id)}
-            disabled={isDeleting}
-            aria-label={`Remove ${document.name}`}
-          >
-            {isDeleting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-          </button>
-          <Link
-            href={`/read/document/${document.id}`}
-            className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-zinc-800"
-            aria-label={`View ${document.name}`}
-          >
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-      </div>
+      </Link>
     </div>
   );
 });

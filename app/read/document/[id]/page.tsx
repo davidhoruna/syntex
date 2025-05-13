@@ -87,9 +87,28 @@ function DocumentViewer({
   useEffect(() => {
     const loadDocument = async () => {
       try {
+        console.log('Loading document with ID:', documentId);
+        
+        // First try to get document from Supabase
+        try {
+          const docResult = await getDocument(documentId);
+          if (docResult) {
+            console.log('Document found in database:', docResult);
+            setDocumentData({
+              ...defaultDocument,
+              ...docResult,
+              name: docResult.name || defaultDocument.name,
+              folderId: docResult.folder_id || '',
+            });
+            setNewFileName(docResult.name || defaultDocument.name);
+          }
+        } catch (dbError) {
+          console.error('Error loading document from database:', dbError);
+        }
+        
         // Check if we have this document in localStorage (uploaded documents)
-        const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]')
-        const uploadedDoc = storedDocs.find((doc: any) => doc.id === documentId)
+        const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
+        const uploadedDoc = storedDocs.find((doc: any) => doc.id === documentId);
         
         if (uploadedDoc) {
           console.log('Document found in localStorage:', {
@@ -105,6 +124,13 @@ function DocumentViewer({
           if (uploadedDoc.extractedText) {
             setExtractedText(uploadedDoc.extractedText);
           }
+          
+          // Update any missing document data from localStorage
+          setDocumentData((prevData: any) => ({
+            ...prevData,
+            name: uploadedDoc.name || prevData.name,
+            folderId: uploadedDoc.folderId || prevData.folderId || '',
+          }));
           
           // Try to load summaries from different sources
           let summariesLoaded = false;
@@ -223,8 +249,12 @@ function DocumentViewer({
     if (!extractedText || generatingSummaries) return;
     
     setGeneratingSummaries(true);
+    console.log('Regenerating summaries for document:', documentId);
     
     try {
+      // Show a temporary loading state in the UI
+      setSummaries(['Generating summaries, please wait...']);
+      
       const response = await fetch('/api/pdf/summarize', {
         method: 'POST',
         headers: {
@@ -232,30 +262,58 @@ function DocumentViewer({
         },
         body: JSON.stringify({
           text: extractedText,
-          numSummaries: flashcardCount
+          numSummaries: flashcardCount,
+          documentId // Send the document ID so it can be stored in database
         }),
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.summaries) {
-          setSummaries(data.summaries);
-          // Update in localStorage
-          const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
-          const docIndex = storedDocs.findIndex((doc: any) => doc.id === documentId);
-          
-          if (docIndex !== -1) {
-            storedDocs[docIndex].summaries = data.summaries;
-            localStorage.setItem('syntexDocuments', JSON.stringify(storedDocs));
-          }
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.summaries && data.summaries.length > 0) {
+        console.log('Generated summaries successfully:', data.summaries.length);
+        setSummaries(data.summaries);
+        
+        // Update in localStorage
+        const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
+        const docIndex = storedDocs.findIndex((doc: any) => doc.id === documentId);
+        
+        if (docIndex !== -1) {
+          console.log('Updating summaries in localStorage');
+          storedDocs[docIndex].summaries = data.summaries;
+          localStorage.setItem('syntexDocuments', JSON.stringify(storedDocs));
         }
+        
+        // Show the flashcard view automatically after generating
+        setShowFlashcard(true);
+        
+        // Refresh summaries from database after a short delay
+        setTimeout(async () => {
+          try {
+            const dbSummaries = await getSummaries(documentId);
+            if (dbSummaries && dbSummaries.length > 0) {
+              console.log('Successfully retrieved summaries from database:', dbSummaries.length);
+              const summaryContents = dbSummaries.map(summary => summary.content);
+              setSummaries(summaryContents);
+            }
+          } catch (error) {
+            console.error('Error refreshing summaries from database:', error);
+          }
+        }, 2000);
+      } else {
+        console.error('No summaries returned from API');
+        setSummaries(defaultSummaries);
       }
     } catch (error) {
       console.error('Error regenerating summaries:', error);
+      setSummaries(['Error generating summaries. Please try again.']);
     } finally {
       setGeneratingSummaries(false);
     }
-  }, [extractedText, flashcardCount, documentId]);
+  }, [extractedText, flashcardCount, documentId, defaultSummaries]);
   
   // Reset drag state when changing cards
   useEffect(() => {
@@ -286,29 +344,55 @@ function DocumentViewer({
     // In a real app, this would start/stop audio playback
   }, [])
 
-  // Handle drag interactions for card swiping
+  // Handle drag interactions for card swiping with improved detection
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault() // Prevent default to ensure consistent behavior
     setIsDragging(true)
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
     setDragStartX(clientX)
+    
+    // Log drag start for debugging
+    console.log('Drag start:', clientX)
   }, [])
 
   const handleDragMove = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!isDragging) return
+    
+    // Prevent default to make sure we capture all touch events
+    e.preventDefault()
+    e.stopPropagation()
+    
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
     const delta = clientX - dragStartX
     setDragDelta(delta)
+    
+    // Log larger moves for debugging
+    if (Math.abs(delta) > 50) {
+      console.log('Significant drag:', delta)
+    }
   }, [isDragging, dragStartX])
 
-  const handleDragEnd = useCallback(() => {
+  const handleDragEnd = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!isDragging) return
+    
+    // Prevent default behavior
+    e?.preventDefault()
+    
     setIsDragging(false)
     
+    // Log drag end info
+    console.log('Drag ended with delta:', dragDelta)
+    
+    // Make swipe detection more sensitive
+    const swipeThreshold = 50 // Lower threshold for easier swiping
+    
     // If dragged far enough, change card
-    if (Math.abs(dragDelta) > 100) {
+    if (Math.abs(dragDelta) > swipeThreshold) {
       if (dragDelta > 0 && currentCardIndex > 0) {
+        console.log('Swiping to previous card')
         prevCard()
       } else if (dragDelta < 0 && currentCardIndex < summaries.length - 1) {
+        console.log('Swiping to next card')
         nextCard()
       }
     }
@@ -317,14 +401,25 @@ function DocumentViewer({
     setDragDelta(0)
   }, [isDragging, dragDelta, currentCardIndex, prevCard, nextCard, summaries.length])
 
-  // Calculate card style based on drag state
+  // Calculate card style based on drag state with improved transitions
   const cardStyle: React.CSSProperties = {
-    transform: `translateX(${dragDelta}px) rotate(${dragDelta * 0.1}deg)`,
-    transition: isDragging ? 'none' : 'transform 0.3s ease',
+    transform: `translateX(${dragDelta}px) rotate(${dragDelta * 0.05}deg)`,
+    transition: isDragging ? 'none' : 'all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
     cursor: isDragging ? 'grabbing' : 'grab',
     maxHeight: '70vh',
     overflowY: 'auto' as const,
-    WebkitOverflowScrolling: 'touch' as const
+    WebkitOverflowScrolling: 'touch' as const,
+    // Add these properties to ensure proper handling on touch devices
+    touchAction: 'none',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    MozUserSelect: 'none',
+    msUserSelect: 'none',
+    willChange: 'transform',
+    // Fix black screen issue with proper background and text colors
+    backgroundColor: '#27272a', // zinc-800
+    color: '#fff',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
   }
 
   // Return loading state if still loading
@@ -340,14 +435,15 @@ function DocumentViewer({
   return (
     <div className="container py-4 md:py-8 px-3 md:px-4">
       <div className="max-w-3xl mx-auto space-y-4 md:space-y-6">
-        {/* Mobile header */}
-        <div className="md:hidden flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-          <Link
-            href={documentData.folderId ? `/read/folder/${documentData.folderId}` : "/read"}
-            className="text-zinc-400 hover:text-white p-1.5 rounded-full hover:bg-zinc-800"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
+          {/* Mobile header */}
+          <div className="md:hidden flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+            <Link
+              href={documentData.folderId ? `/read/folder/${documentData.folderId}` : "/read"}
+              className="text-zinc-400 hover:text-white p-1.5 rounded-full hover:bg-zinc-800"
+              aria-label="Back to folder"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
           
           {isRenaming ? (
             <div className="flex-1 flex items-center gap-2 px-2">
@@ -568,7 +664,7 @@ function DocumentViewer({
 
         {/* Flashcard view */}
         {showFlashcard && summaries.length > 0 && (
-          <div ref={containerRef} className="relative h-[60vh] md:h-[70vh] flex flex-col items-center justify-center">          
+          <div ref={containerRef} className="relative h-[60vh] md:h-[70vh] flex flex-col items-center justify-center bg-zinc-900 p-4 rounded-lg border border-zinc-800">          
             {/* Card container with navigation buttons */}
             <div className="relative w-full max-w-[95vw] md:max-w-2xl mx-auto">
               {/* Summary card */}
@@ -583,10 +679,13 @@ function DocumentViewer({
                 onTouchStart={handleDragStart}
                 onTouchMove={handleDragMove}
                 onTouchEnd={handleDragEnd}
+                onTouchCancel={handleDragEnd}
+                draggable="false"
+                data-card-index={currentCardIndex}
               >
-                <div className="h-full flex flex-col p-4 md:p-6">
+                <div className="h-full flex flex-col p-4 md:p-6 bg-zinc-800 text-white">
                   <div className="flex justify-between items-center mb-4">
-                    <span className="text-sm font-medium text-zinc-400">
+                    <span className="text-sm font-medium text-zinc-200">
                       Section {currentCardIndex + 1} of {summaries.length}
                     </span>
                     <button

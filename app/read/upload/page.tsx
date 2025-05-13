@@ -132,150 +132,146 @@ function UploadForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return;
-
-    setUploading(true); // indicates the start of the overall process
-    setProcessing(true); // show a general processing state
-    setError(null);
-    setProgress(0); // reset progress
-
-    try {
-        setStatus('Preparing document...');
-        setProgress(10);
-
-        // OPTIONAL: Still upload the original file if you want to store it before processing
-        const uploadResult = await uploadFile(file);
-        if (!uploadResult) {
-            throw new Error('Failed to upload file before processing.');
-        }
-
-        setStatus('File uploaded, starting processing...');
-        setProgress(30);
-
-        // Create FormData to send to the API
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('flashcardCount', flashcardCount.toString());
-
-        setStatus('Processing document via API...');
-        setProgress(50); // update progress based on API response stages if possible
-
-        const response = await fetch('/api/pdf/process', {
-            method: 'POST',
-            body: formData,
-        });
-
-        setProgress(80);
-
-        let responseData;
-        try {
-            responseData = await response.json();
-        } catch (jsonError: any) {
-            console.error('Error parsing JSON response:', jsonError);
-            throw new Error(`Failed to parse API response: ${jsonError?.message || 'Unknown JSON parsing error'}`);
-        }
-
-        if (!response.ok) {
-            const errorMessage = responseData?.error || `API request failed with status ${response.status}`;
-            console.error('API error response:', responseData);
-            throw new Error(errorMessage);
-        }
-
-        const result = responseData;
-
-        if (result.success) {
-            setStatus('Processing complete!');
-            setProgress(100);
-
-            // Save document metadata to localStorage with all processing results
-            const newDocId = Date.now().toString(); // use an ID from the API if it returns one
-            const newDocument = {
-                id: newDocId,
-                name: file.name,
-                type: file.type.split('/')[1] || 'pdf',
-                size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-                uploadDate: new Date().toISOString().split('T')[0],
-                folderId: folderId || '',
-                path: uploadResult ? uploadResult.path : file.name, // you still use uploadFile
-                fullPath: uploadResult ? uploadResult.fullPath : file.name,
-                summaries: result.summaries, // summaries from the API
-                extractedText: result.extractedText, // Save extracted text for potential regeneration
-                embeddings: result.embeddings, // Save embeddings if needed
-                processingError: null
-            };
-            
-            // Log the document being saved for debugging
-            console.log('Saving document with summaries:', {
-                id: newDocId,
-                name: file.name,
-                summariesCount: result.summaries?.length || 0,
-                extractedTextLength: result.extractedText?.length || 0
-            });
-
-            // 1. Save to localStorage for client-side access
-            const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
-            localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]));
-            
-            // 2. Also save to Supabase database so it appears in folders
-            try {
-                // Import the database service
-                const { uploadDocument } = await import('@/lib/db-service');
-                
-                if (uploadDocument && file) {
-                    console.log('Saving document to Supabase database...');
-                    // This will properly add the document to Supabase database with the folder ID
-                    const dbDocument = await uploadDocument(file, folderId || undefined);
-                    
-                    if (dbDocument) {
-                        console.log('Document saved to database successfully:', dbDocument.id);
-                        
-                        // Also save summaries to Supabase if they exist
-                        if (result.summaries && result.summaries.length > 0) {
-                            const { createSummary } = await import('@/lib/db-service');
-                            
-                            // Save each summary
-                            for (const summary of result.summaries) {
-                                await createSummary(dbDocument.id, summary);
-                            }
-                            console.log(`Saved ${result.summaries.length} summaries to database`);
-                        }
-                    }
-                }
-            } catch (dbError) {
-                console.error('Error saving document to database:', dbError);
-                // Continue anyway - we still have the document in localStorage
-            }
-
-            router.push(`/read/document/${newDocId}`);
-        } else {
-            throw new Error(result.error || 'Processing failed for an unknown reason.');
-        }
-    } catch (error) {
-        console.error('Error in handleSubmit:', error);
-        setError(error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.');
-
-        // Additionally, save a record of the failed attempt to localStorage if desired
-        const newDocId = Date.now().toString();
-        const newDocument = {
-            id: newDocId,
-            name: file.name,
-            type: file.type.split('/')[1] || 'pdf',
-            size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-            uploadDate: new Date().toISOString().split('T')[0],
-            folderId: folderId || '',
-            path: file.name, // from uploadResult if used
-            summaries: ['Failed to process document for summaries'],
-            processingError: error instanceof Error ? error.message : 'Unknown error'
-        };
-        const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
-        localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]));
-        router.push(`/read/document/${newDocId}`);
-    } finally {
-        setUploading(false);
-        setProcessing(false);
-        // Optionally, keep the status message for user feedback
+    
+    if (!file) {
+      setError('Please select a file to upload');
+      return;
     }
-};
+    
+    setUploading(true);
+    setProcessing(true);
+    setError(null);
+    setProgress(0);
+    setStatus('Starting upload...');
+    
+    try {
+      // 1. Upload the file to storage
+      setStatus('Uploading file...');
+      setProgress(20);
+      
+      // Cast the uploadResult to include the potential error property
+      const uploadResult = await uploadFile(file, 'documents') as any;
+      
+      if (!uploadResult || uploadResult.error) {
+        throw new Error(uploadResult?.error || 'File upload failed');
+      }
+      
+      setStatus('File uploaded, starting processing...');
+      setProgress(30);
+
+      // 2. First create the document record in the database
+      const { uploadDocument } = await import('@/lib/db-service');
+      const documentRecord = await uploadDocument(file, folderId || '');
+      
+      if (!documentRecord) {
+        throw new Error('Failed to create document record in database');
+      }
+      
+      console.log('Document record created in database:', documentRecord);
+      
+      // 3. Create FormData to send to the API
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('flashcardCount', flashcardCount.toString());
+      formData.append('documentId', documentRecord.id); // Pass the document ID
+
+      setStatus('Processing document via API...');
+      setProgress(50);
+
+      // 4. Process the document with the API
+      const response = await fetch('/api/pdf/process', {
+          method: 'POST',
+          body: formData,
+      });
+
+      setProgress(80);
+
+      let responseData;
+      try {
+          responseData = await response.json();
+      } catch (jsonError: any) {
+          console.error('Error parsing JSON response:', jsonError);
+          throw new Error(`Failed to parse API response: ${jsonError?.message || 'Unknown JSON parsing error'}`);
+      }
+
+      if (!response.ok) {
+          const errorMessage = responseData?.error || `API request failed with status ${response.status}`;
+          console.error('API error response:', responseData);
+          throw new Error(errorMessage);
+      }
+
+      const result = responseData;
+
+      if (result.success) {
+          setStatus('Processing complete!');
+          setProgress(100);
+
+          // 5. Create document object for localStorage
+          const newDocument = {
+              id: documentRecord.id, // Use the UUID from the database
+              name: file.name,
+              type: file.type.split('/')[1] || 'pdf',
+              size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+              uploadDate: new Date().toISOString().split('T')[0],
+              folderId: folderId || '',
+              path: uploadResult.path || '',
+              fullPath: uploadResult.fullPath || '',
+              summaries: result.summaries || [],
+              extractedText: result.extractedText || '',
+              isLocal: uploadResult.isLocal || false,
+              localUrl: uploadResult.localUrl || null,
+          };
+
+          // 6. Log the document for debugging
+          console.log('Saving document with summaries:', {
+              id: documentRecord.id,
+              name: file.name,
+              summariesCount: result.summaries?.length || 0,
+              extractedTextLength: result.extractedText?.length || 0
+          });
+
+          // 7. Save to localStorage for client-side access
+          const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
+          localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]));
+          
+          setStatus('Document processed and saved!');
+          
+          // 8. Redirect to the document page using the database ID
+          router.push(`/read/document/${documentRecord.id}`);
+      } else {
+        throw new Error(result.error || 'Processing failed for an unknown reason.');
+      }
+    } catch (error) {
+      console.error('Error in handleSubmit:', error);
+      setError(error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.');
+
+      // Additionally, save a record of the failed attempt to localStorage if desired
+      const newDocId = Date.now().toString();
+      const newDocument = {
+        id: newDocId,
+        name: file ? file.name : 'Unknown PDF',
+        type: file ? file.type.split('/')[1] || 'pdf' : 'pdf',
+        size: file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'Unknown',
+        uploadDate: new Date().toISOString().split('T')[0],
+        folderId: folderId || '',
+        path: file ? file.name : '',
+        fullPath: file ? file.name : '',
+        summaries: ['Failed to process document for summaries'],
+        extractedText: 'Error processing document',
+        processingError: error instanceof Error ? error.message : 'Unknown error'
+      };
+      
+      // Still save the document in localStorage, but mark it as having errors
+      const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
+      localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]));
+      
+      // Redirect to document page even with error so user can see result
+      router.push(`/read/document/${newDocId}`);
+    } finally {
+      setUploading(false);
+      setProcessing(false);
+    }
+  };
   
   return (
     <div className="container py-8">

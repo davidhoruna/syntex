@@ -290,6 +290,39 @@ export async function updateDocument(id: string, updates: { name?: string; folde
   return data[0] as Document
 }
 
+// Update a document's content, embedding, and metadata
+export async function updateDocumentContent(id: string, updates: { content?: string; embedding?: any; metadata?: any }) {
+  const userId = await getCurrentUserId()
+  if (!userId) return null
+
+  console.log(`Updating document content for ID ${id}`, updates)
+
+  // First check if the document belongs to the user
+  const document = await getDocument(id)
+  if (!document) {
+    console.error(`Document ${id} not found or doesn't belong to user ${userId}`)
+    return null
+  }
+
+  const { data, error } = await supabase
+    .from("documents")
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select()
+
+  if (error) {
+    console.error("Error updating document content:", error)
+    return null
+  }
+
+  console.log(`Successfully updated document content for ID ${id}`)
+  return data[0] as Document
+}
+
 // Upload a document
 export async function uploadDocument(file: File, folderId?: string) {
   const userId = await getCurrentUserId()

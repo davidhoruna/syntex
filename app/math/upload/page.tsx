@@ -174,59 +174,77 @@ function UploadForm() {
         setStatus('Saving document...')
         setProgress(90)
         
-        // 4. Create document object
-        const newDocId = Date.now().toString()
+        // 4. First create the document record in the database
+        const { uploadDocument } = await import('@/lib/db-service');
+        
+        setStatus('Creating document record...');
+        console.log('Creating document record in database');
+        
+        const documentRecord = await uploadDocument(file, folderId || '');
+        
+        if (!documentRecord) {
+          throw new Error('Failed to create document record in database');
+        }
+        
+        console.log('Document record created in database:', documentRecord);
+        
+        // 5. Create FormData to pass to server for processing content and saving summaries
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('flashcardCount', flashcardCount.toString());
+        formData.append('documentId', documentRecord.id); // Pass the document ID
+        
+        setStatus('Sending to API for processing...');
+        setProgress(75);
+        
+        // 6. Process with API to save content and embeddings to database
+        try {
+          const response = await fetch('/api/pdf/process', {
+            method: 'POST',
+            body: formData,
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData?.error || `API request failed with status ${response.status}`);
+          }
+          
+          console.log('Successfully processed document with API');
+        } catch (apiError) {
+          console.error('Error processing document with API:', apiError);
+          // Continue even if API processing fails - we already have the summaries
+        }
+        
+        // 7. Create document object for localStorage
         const newDocument = {
-          id: newDocId,
+          id: documentRecord.id, // Use database ID
           name: file.name,
           type: file.type.split('/')[1] || 'pdf',
           size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
           uploadDate: new Date().toISOString().split('T')[0],
           folderId: folderId || '',
-          path: result.path,
-          fullPath: result.fullPath,
-          isLocal: result.isLocal || false,
-          localUrl: result.localUrl || null,
+          path: documentRecord.file_path || '',
+          fullPath: documentRecord.file_path || '',
+          isLocal: false,
+          localUrl: null,
           summaries,
           extractedText: extractedText.substring(0, 5000) // Store first 5000 chars for reference
         }
         
-        // 5. Store in localStorage
+        // 8. Store in localStorage
         const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]')
         localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]))
         
-        // 6. Also save to Supabase database so it appears in folders
-        try {
-          // Import the database service
-          const { uploadDocument } = await import('@/lib/db-service');
+        // Document is already saved to Supabase database
+        if (documentRecord) {
+          console.log('Document saved to database successfully:', documentRecord.id);
           
-          if (uploadDocument && file) {
-            console.log('Saving document to Supabase database...');
-            // This will properly add the document to Supabase database with the folder ID
-            const dbDocument = await uploadDocument(file, folderId || undefined);
-            
-            if (dbDocument) {
-              console.log('Document saved to database successfully:', dbDocument.id);
-              
-              // Also save summaries to Supabase if they exist
-              if (summaries && summaries.length > 0) {
-                const { createSummary } = await import('@/lib/db-service');
-                
-                // Save each summary
-                for (const summary of summaries) {
-                  await createSummary(dbDocument.id, summary);
-                }
-                console.log(`Saved ${summaries.length} summaries to database`);
-              }
-            }
-          }
-        } catch (dbError) {
-          console.error('Error saving document to database:', dbError);
-          // Continue anyway - we still have the document in localStorage
+          // The summaries should be saved by the API call to /api/pdf/process
+          // No need to manually save them here since we passed the documentId
         }
         
         // 7. Redirect to the document page
-        router.push(`/math/document/${newDocId}`)
+        router.push(`/math/document/${documentRecord.id}`);
       } catch (processingError) {
         console.error('Error processing PDF:', processingError);
         

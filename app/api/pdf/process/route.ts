@@ -54,6 +54,94 @@ export async function POST(request: NextRequest) {
         // Continue even if embeddings fail
       }
       
+      // 4. Extract document ID from formData if provided
+      const documentId = formData.get('documentId');
+      
+      // 5. If document ID is provided, save content, embedding, and metadata to database
+      if (documentId) {
+        try {
+          // Import required modules
+          const { createClient } = await import('@supabase/supabase-js');
+          
+          console.log(`Saving document data to database for document ID: ${documentId}`);
+          
+          // Create direct Supabase client for server-side usage
+          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://etltjlriajrbrqfxreet.supabase.co';
+          const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+          
+          if (!supabaseServiceKey) {
+            console.error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
+            throw new Error('Missing Supabase service role key');
+          }
+          
+          const supabase = createClient(supabaseUrl, supabaseServiceKey);
+          
+          // Get the document to obtain the user_id (needed for the update)
+          const { data: document, error: getDocError } = await supabase
+            .from('documents')
+            .select('user_id')
+            .eq('id', documentId)
+            .single();
+            
+          if (getDocError || !document) {
+            console.error('Error getting document details:', getDocError);
+            throw new Error(`Could not find document with ID ${documentId}`);
+          }
+          
+          // Update document with content, embedding, and metadata
+          const { data: updatedDoc, error: updateError } = await supabase
+            .from('documents')
+            .update({
+              content: extractedText.substring(0, 10000), // First 10K chars
+              embedding: embeddings,
+              metadata: { 
+                summaries_count: summaries.length,
+                processed_at: new Date().toISOString()
+              }
+            })
+            .eq('id', documentId)
+            .eq('user_id', document.user_id)
+            .select();
+          
+          if (updateError) {
+            console.error('Error updating document content in database:', updateError);
+          } else {
+            console.log('Successfully updated document content in database');
+          }
+          
+          // Save each summary to the database
+          if (summaries && summaries.length > 0) {
+            console.log(`Saving ${summaries.length} summaries to database`);
+            
+            // Clear any existing summaries for this document
+            const { error: deleteError } = await supabase
+              .from('summaries')
+              .delete()
+              .eq('document_id', documentId);
+              
+            if (deleteError) {
+              console.error('Error deleting existing summaries:', deleteError);
+            }
+            
+            // Save each summary directly using Supabase
+            for (const content of summaries) {
+              const { error } = await supabase
+                .from('summaries')
+                .insert([{ document_id: documentId, content }]);
+                
+              if (error) {
+                console.error('Error saving summary:', error);
+              }
+            }
+            
+            console.log('Successfully saved summaries to database');
+          }
+        } catch (dbError) {
+          console.error('Error saving to database:', dbError);
+          // Continue even if database operations fail
+        }
+      }
+      
       console.log('PDF processing complete, returning success response');
       return NextResponse.json({
         success: true,
