@@ -1,16 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { FolderPlus, Upload } from "lucide-react"
 import { MathFolderGrid } from "@/components/math/folder-grid"
 import { createFolder } from "@/lib/db-service"
+import { useAuth } from "@/contexts/auth-context"
+import { useRouter } from "next/navigation"
 
 export default function MathPage() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const { user } = useAuth()
+  const router = useRouter()
 
   const handleCreateFolder = async () => {
     if (isCreatingFolder) return
+    
+    // Check if user is authenticated before allowing folder creation
+    if (!user) {
+      // Redirect to login page with redirect back to math page
+      router.push(`/login?redirectTo=${encodeURIComponent('/math')}`)
+      return
+    }
 
     const name = prompt("Enter folder name:")
     if (!name) return

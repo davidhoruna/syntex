@@ -32,7 +32,7 @@ export default function Home() {
       </div>
 
       <div className="max-w-md w-full">
-        <SupabaseStatus />
+      {/* <SupabaseStatus /> */}
       </div>
     </div>
   )

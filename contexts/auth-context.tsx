@@ -46,15 +46,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGitHub = async () => {
     try {
+      // Get the current hostname - works in both localhost and production deployments
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      
+      // Log auth attempt for debugging
+      console.log(`Starting GitHub auth from origin: ${origin}`);
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${origin}/auth/callback`,
+          // Prevent the redirectTo from defaulting to localhost in production
+          skipBrowserRedirect: false,
         },
       })
-      if (error) throw error
+      
+      if (error) throw error;
     } catch (error) {
-      console.error("Error signing in with GitHub:", error)
+      console.error("Error signing in with GitHub:", error);
     }
   }
 

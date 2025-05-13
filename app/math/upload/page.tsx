@@ -12,9 +12,34 @@ import { uploadFile } from "@/lib/file-service"
 // In a real app, this would come from a database
 import { getFolders } from "@/lib/db-service"
 import type { Folder } from "@/lib/supabase"
+import { useAuth } from "@/contexts/auth-context"
 
 // Main component that handles the Suspense boundary
 export default function UploadPage() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+  
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push(`/login?redirectTo=${encodeURIComponent('/math/upload')}`)
+    }
+  }, [user, loading, router])
+  
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center">
+        <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
+      </div>
+    )
+  }
+  
+  // If not authenticated, don't render the form at all (will redirect)
+  if (!user) {
+    return null
+  }
+  
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="container mx-auto py-8">
@@ -24,10 +49,10 @@ export default function UploadPage() {
               <Link href="/math" className="text-zinc-400 hover:text-white mr-4">
                 <ArrowLeft className="h-5 w-5" />
               </Link>
-              <h1 className="text-xl font-bold mb-4">Upload Document</h1>
+              <h1 className="text-xl font-bold">Upload Document</h1>
             </div>
             
-            <Suspense fallback={<div>Loading form...</div>}>
+            <Suspense fallback={<div className="p-4 text-center"><Loader2 className="h-6 w-6 text-blue-500 animate-spin mx-auto mb-2" />Loading form...</div>}>
               <UploadForm />
             </Suspense>
           </div>
@@ -39,9 +64,19 @@ export default function UploadPage() {
 
 // Component that uses useSearchParams, wrapped in Suspense
 function UploadForm() {
+  const { user } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
   const initialFolderId = searchParams.get("folder") || ""
+  
+  // Additional safety - if somehow the form loads without auth
+  if (!user) {
+    return (
+      <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-md">
+        Please <Link href="/login" className="text-white underline">log in</Link> to upload documents.
+      </div>
+    )
+  }
 
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)

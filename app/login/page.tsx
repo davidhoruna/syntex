@@ -30,7 +30,6 @@ export default function LoginPage() {
   return (
     <div className="container flex items-center justify-center min-h-screen">
       <div className="max-w-md w-full p-8 bg-zinc-900 border border-zinc-800 rounded-lg">
-        <h1 className="text-3xl font-bold text-center mb-8">Syntex</h1>
 
         {error && <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-md mb-6">{error}</div>}
 
