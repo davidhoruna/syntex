@@ -9,31 +9,38 @@ export default function AuthCallbackPage() {
   const searchParams = useSearchParams()
   const error = searchParams.get("error")
   const errorDescription = searchParams.get("error_description")
+  const code = searchParams.get("code")
   const supabase = createBrowserSupabaseClient()
 
   useEffect(() => {
     // Handle the OAuth callback
     const handleAuthCallback = async () => {
-      try {
-        // Get the session to confirm authentication
-        const { data, error: sessionError } = await supabase.auth.getSession()
+      if (code) {
+        // Call the API route to exchange the code for a session
+        try {
+          // First call our API endpoint to handle session exchange
+          await fetch(`/api/auth/callback?code=${code}`)
+          
+          // Then get the session to confirm authentication
+          const { data, error: sessionError } = await supabase.auth.getSession()
 
-        if (sessionError) {
-          throw sessionError
-        }
+          if (sessionError) {
+            throw sessionError
+          }
 
-        if (data.session) {
-          // Redirect to the dashboard or home page
-          const redirectTo = localStorage.getItem("redirectTo") || "/"
-          localStorage.removeItem("redirectTo") // Clean up
-          router.push(redirectTo)
-        } else {
-          // No session found, redirect to login with error
+          if (data.session) {
+            // Redirect to the dashboard or home page
+            const redirectTo = localStorage.getItem("redirectTo") || "/"
+            localStorage.removeItem("redirectTo") // Clean up
+            router.push(redirectTo)
+          } else {
+            // No session found, redirect to login with error
+            router.push("/login?error=Authentication failed")
+          }
+        } catch (error) {
+          console.error("Error during auth callback:", error)
           router.push("/login?error=Authentication failed")
         }
-      } catch (error) {
-        console.error("Error during auth callback:", error)
-        router.push("/login?error=Authentication failed")
       }
     }
 
@@ -44,7 +51,7 @@ export default function AuthCallbackPage() {
     } else {
       handleAuthCallback()
     }
-  }, [router, error, errorDescription, supabase])
+  }, [router, error, errorDescription, code, supabase])
 
   return (
     <div className="container flex items-center justify-center min-h-screen">

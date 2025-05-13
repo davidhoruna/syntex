@@ -1,0 +1,280 @@
+# LangChain + OpenAI PDF Processing Implementation Plan for Syntex
+
+## Current Architecture
+- PDF.js for text extraction from PDF files
+- Custom code for handling scientific paper layouts
+- OpenAI directly for summarization
+- Local storage for documents and summaries
+
+## Proposed Changes
+
+### 1. Dependencies to Add
+```bash
+npm install langchain @langchain/openai @langchain/community
+```
+
+### 2. Implementation Phases
+
+#### Phase 1: PDF Loading & Text Extraction
+- Replace PDF.js with LangChain's PDF loaders
+- Create a new utility file: `lib/langchain-utils.ts`
+- Implement PDF document loading with better extraction
+
+```typescript
+// lib/langchain-utils.ts
+import { PDFLoader } from "langchain/document_loaders/fs/pdf";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+
+export async function extractTextFromPDFWithLangChain(file: File): Promise<string> {
+  // Convert File to Blob for LangChain loader
+  const blob = new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
+  
+  // Create PDF loader
+  const loader = new PDFLoader(blob);
+  
+  // Load PDF document
+  const docs = await loader.load();
+  
+  // Return combined text from all pages
+  return docs.map(doc => doc.pageContent).join('\n\n');
+}
+```
+
+#### Phase 2: Replace Server API Route
+- Update the PDF extraction API to use LangChain
+- Maintain fallback mechanisms for robustness
+
+```typescript
+// app/api/pdf/extract/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { extractTextFromPDFWithLangChain } from '@/lib/langchain-utils';
+
+export async function POST(request: NextRequest) {
+  try {
+    // Get the PDF file from the request
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+    
+    // Basic validation (unchanged)
+    if (!file || !file.type.includes('pdf') || file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Invalid file' }, { status: 400 });
+    }
+    
+    // Extract metadata
+    const fileName = file.name;
+    const fileSize = file.size;
+    const fileType = file.type;
+    
+    try {
+      // Use LangChain to extract text
+      const text = await extractTextFromPDFWithLangChain(file);
+      
+      return NextResponse.json({
+        success: true,
+        text,
+        pageCount: text.split('\n\n').length, // Approximate
+        metadata: { fileName, fileSize, fileType }
+      });
+    } catch (error) {
+      // Fallback handling (simplified version)
+      console.error('PDF parsing error:', error);
+      return NextResponse.json({
+        success: true,
+        text: `Failed to extract text from "${fileName}". Please try a different file.`,
+        pageCount: 1,
+        metadata: { fileName, fileSize, fileType },
+        warning: "PDF extraction failed"
+      });
+    }
+  } catch (error) {
+    console.error('Error processing PDF:', error);
+    return NextResponse.json({ error: 'Failed to process PDF' }, { status: 500 });
+  }
+}
+```
+
+#### Phase 3: Enhanced Summarization with LangChain
+- Replace direct OpenAI calls with LangChain
+- Implement document chunking for better processing
+- Use structured output for more consistent summaries
+
+```typescript
+// lib/langchain-utils.ts (additional functions)
+import { ChatOpenAI } from "@langchain/openai";
+import { StructuredOutputParser } from "langchain/output_parsers";
+import { PromptTemplate } from "@langchain/core/prompts";
+
+export async function generateSummariesWithLangChain(
+  text: string, 
+  numSections = 5
+): Promise<string[]> {
+  // Split text into manageable chunks
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 4000,
+    chunkOverlap: 200,
+  });
+  const chunks = await splitter.createDocuments([text]);
+  
+  // Define output structure
+  const parser = StructuredOutputParser.fromNamesAndDescriptions({
+    summaries: `An array of ${numSections} comprehensive summary sections, each 100-150 words`,
+  });
+  
+  // Create prompt template
+  const promptTemplate = new PromptTemplate({
+    template: `You are an expert at summarizing complex documents, especially scientific papers.
+    
+    Create {numSections} comprehensive summary sections from this text content.
+    Each section should cover a major topic or theme from the document.
+    
+    Text content: {text}
+    
+    {format_instructions}`,
+    inputVariables: ["text", "numSections"],
+    partialVariables: {
+      format_instructions: parser.getFormatInstructions(),
+    },
+  });
+  
+  // Initialize ChatOpenAI model
+  const model = new ChatOpenAI({
+    modelName: "gpt-4o", 
+    temperature: 0.7,
+  });
+  
+  // Process manageable chunks of the document
+  const firstChunks = chunks.slice(0, 3); // Process beginning of document
+  const combinedText = firstChunks.map(doc => doc.pageContent).join("\n\n");
+  
+  // Generate summary
+  const input = await promptTemplate.format({
+    text: combinedText,
+    numSections: numSections,
+  });
+  const response = await model.invoke(input);
+  
+  // Parse structured output
+  const parsedOutput = await parser.parse(response.content);
+  return parsedOutput.summaries;
+}
+```
+
+#### Phase 4: Update API Routes
+- Replace the summarization API with LangChain version
+
+```typescript
+// app/api/pdf/summarize/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { generateSummariesWithLangChain } from '@/lib/langchain-utils';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { text, numSummaries = 5 } = await request.json();
+    
+    if (!text || typeof text !== 'string') {
+      return NextResponse.json(
+        { error: 'No text provided or invalid format' },
+        { status: 400 }
+      );
+    }
+    
+    // Generate summaries using LangChain
+    const summaries = await generateSummariesWithLangChain(text, numSummaries);
+    
+    return NextResponse.json({
+      success: true,
+      summaries: summaries.length > 0 ? summaries : ['No summary could be generated for this document.']
+    });
+  } catch (error) {
+    console.error('Error generating summaries:', error);
+    return NextResponse.json(
+      { error: 'Failed to generate summaries' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### 3. Advanced Features to Add Later
+
+#### Vector Storage & Retrieval
+- Create embeddings from PDF text
+- Store vectors in a vector database (e.g., Supabase pgvector)
+- Implement semantic search across documents
+
+```typescript
+// Example embeddings implementation
+import { OpenAIEmbeddings } from "@langchain/openai";
+import { SupabaseVectorStore } from "@langchain/community/vectorstores/supabase";
+
+export async function createDocumentEmbeddings(documentId: string, text: string) {
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 100,
+  });
+  
+  const docs = await splitter.createDocuments([text], [{documentId}]);
+  
+  const embeddings = new OpenAIEmbeddings();
+  const vectorStore = await SupabaseVectorStore.fromDocuments(
+    docs,
+    embeddings,
+    {
+      client: supabaseClient,
+      tableName: "document_embeddings",
+      queryName: "match_documents",
+    }
+  );
+  
+  return vectorStore;
+}
+```
+
+#### Q&A with Retrieved Context
+- Implement document Q&A using LangChain RetrievalQA
+- Allow users to ask questions about their documents
+
+## Integration Steps
+
+1. Create the langchain-utils.ts file first
+2. Test PDF extraction separately
+3. Replace the PDF extraction API route
+4. Update the client-side code to handle the new response format
+5. Implement the summarization with LangChain
+6. Add vector storage and retrieval as an enhancement
+
+## Benefits Over Current Implementation
+
+1. **Better PDF Processing**:
+   - LangChain's PDF loaders handle a wider variety of PDFs
+   - Better for scientific papers and complex layouts
+   - More robust extraction of text structure
+
+2. **Structured Processing Pipeline**:
+   - Cleaner data flow from document → extraction → summarization
+   - Better error handling and fallbacks
+   - More consistent data format
+
+3. **Advanced Features**:
+   - Document search across PDF library
+   - Question answering based on document content
+   - Context-aware document recommendations
+
+4. **Maintainability**:
+   - Leverages well-maintained libraries instead of custom code
+   - More standardized approach to AI document processing
+   - Easier to extend with new features
+
+## Potential Challenges
+
+1. **Cold Start Performance**: 
+   - LangChain has overhead on first run, may need optimization
+
+2. **API Usage**: 
+   - Embedding creation will increase OpenAI API usage and costs
+
+3. **Client-Side Integration**:
+   - May need to update UI to handle new features and processing times
+
+4. **Storage Requirements**:
+   - Vector storage will require database configuration 

@@ -1,107 +1,350 @@
 "use client"
 
 import type React from "react"
-
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ArrowLeft, Upload } from "lucide-react"
+import { useState, useEffect, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { ArrowLeft, Upload, Loader2, AlertTriangle } from "lucide-react"
 import Link from "next/link"
+import { uploadFile } from "@/lib/file-service"
+// Remove direct imports of PDF utils to avoid server-side rendering issues
+// We'll use dynamic imports instead
 
+// In a real app, this would come from a database
+import { getFolders } from "@/lib/db-service"
+import type { Folder } from "@/lib/supabase"
+
+// Main component that handles the Suspense boundary
 export default function UploadPage() {
+  return (
+    <div className="min-h-screen bg-zinc-950 text-white">
+      <div className="container mx-auto py-8">
+        <div className="max-w-xl mx-auto bg-zinc-900 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-6">
+            <div className="flex items-center mb-6">
+              <Link href="/math" className="text-zinc-400 hover:text-white mr-4">
+                <ArrowLeft className="h-5 w-5" />
+              </Link>
+              <h1 className="text-xl font-bold mb-4">Upload Document</h1>
+            </div>
+            
+            <Suspense fallback={<div>Loading form...</div>}>
+              <UploadForm />
+            </Suspense>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Component that uses useSearchParams, wrapped in Suspense
+function UploadForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const initialFolderId = searchParams.get("folder") || ""
+
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
-  const [topic, setTopic] = useState("")
+  const [processing, setProcessing] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [folderId, setFolderId] = useState(initialFolderId)
+  const [error, setError] = useState<string | null>(null)
+  const [flashcardCount, setFlashcardCount] = useState(5)
+  
+  const [folders, setFolders] = useState<Folder[]>([])
+  const [loading, setLoading] = useState(true)
+  
+  useEffect(() => {
+    async function loadFolders() {
+      try {
+        setLoading(true)
+        const data = await getFolders("math")
+        setFolders(data)
+        setError(null)
+      } catch (err) {
+        console.error("Error loading folders:", err)
+        setError("Failed to load folders")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadFolders()
+  }, [])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0])
-      // Extract a topic name from the file name
-      const fileName = e.target.files[0].name.replace(/\.[^/.]+$/, "")
-      setTopic(fileName)
+      const selectedFile = e.target.files[0];
+      
+      // Ensure it's a PDF
+      if (!selectedFile.type.includes('pdf')) {
+        setError('Please select a valid PDF file');
+        return;
+      }
+      
+      // Check file size (limit to 10MB)
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        setError('File is too large. Maximum size is 10MB');
+        return;
+      }
+      
+      setFile(selectedFile);
+      setError(null);
     }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!file || !topic) return
+    if (!file) return
 
     setUploading(true)
+    setProcessing(true)
+    setError(null)
 
-    // In a real app, you would upload the file to a server here
-    // For now, we'll just simulate a delay
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-
-    // Redirect to the learn page with the topic
-    router.push(`/math/learn/${encodeURIComponent(topic)}?source=pdf&difficulty=medium&language=en`)
+    try {
+      setStatus('Uploading file...')
+      
+      // 1. Upload the file
+      const result = await uploadFile(file)
+      if (!result) throw new Error('Failed to upload file')
+      
+      setStatus('Extracting text from PDF...')
+      setProgress(30)
+      
+      try {
+        // 2. Dynamic import of PDF utils
+        const { extractTextFromPDFWithLangChain, generateSummariesWithLangChain } = await import('@/lib/langchain-utils')
+        
+        // Convert file to ArrayBuffer for processing
+        const fileBuffer = await file.arrayBuffer();
+        
+        // 3. Extract text from PDF
+        const extractedText = await extractTextFromPDFWithLangChain(fileBuffer)
+        
+        if (!extractedText || extractedText.trim().length === 0) {
+          throw new Error('Could not extract text from PDF. The file might be scanned or protected')
+        }
+        
+        setStatus('Generating summaries...')
+        setProgress(60)
+        
+        // 4. Generate summaries
+        // This will use mock summaries in client-side environment
+        const summaries = await generateSummariesWithLangChain(extractedText, flashcardCount)
+        
+        setStatus('Processing complete...')
+        setProgress(80)
+        
+        setStatus('Saving document...')
+        setProgress(90)
+        
+        // 4. Create document object
+        const newDocId = Date.now().toString()
+        const newDocument = {
+          id: newDocId,
+          name: file.name,
+          type: file.type.split('/')[1] || 'pdf',
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          uploadDate: new Date().toISOString().split('T')[0],
+          folderId: folderId || '',
+          path: result.path,
+          fullPath: result.fullPath,
+          isLocal: result.isLocal || false,
+          localUrl: result.localUrl || null,
+          summaries,
+          extractedText: extractedText.substring(0, 5000) // Store first 5000 chars for reference
+        }
+        
+        // 5. Store in localStorage
+        const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]')
+        localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]))
+        
+        // 6. Also save to Supabase database so it appears in folders
+        try {
+          // Import the database service
+          const { uploadDocument } = await import('@/lib/db-service');
+          
+          if (uploadDocument && file) {
+            console.log('Saving document to Supabase database...');
+            // This will properly add the document to Supabase database with the folder ID
+            const dbDocument = await uploadDocument(file, folderId || undefined);
+            
+            if (dbDocument) {
+              console.log('Document saved to database successfully:', dbDocument.id);
+              
+              // Also save summaries to Supabase if they exist
+              if (summaries && summaries.length > 0) {
+                const { createSummary } = await import('@/lib/db-service');
+                
+                // Save each summary
+                for (const summary of summaries) {
+                  await createSummary(dbDocument.id, summary);
+                }
+                console.log(`Saved ${summaries.length} summaries to database`);
+              }
+            }
+          }
+        } catch (dbError) {
+          console.error('Error saving document to database:', dbError);
+          // Continue anyway - we still have the document in localStorage
+        }
+        
+        // 7. Redirect to the document page
+        router.push(`/math/document/${newDocId}`)
+      } catch (processingError) {
+        console.error('Error processing PDF:', processingError);
+        
+        // Still save the document even if processing failed
+        const newDocId = Date.now().toString()
+        const newDocument = {
+          id: newDocId,
+          name: file.name,
+          type: file.type.split('/')[1] || 'pdf',
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          uploadDate: new Date().toISOString().split('T')[0],
+          folderId: folderId || '',
+          path: result.path,
+          fullPath: result.fullPath,
+          isLocal: result.isLocal || false,
+          localUrl: result.localUrl || null,
+          summaries: ['Failed to process document for summaries'],
+          processingError: processingError instanceof Error ? processingError.message : 'Unknown error'
+        }
+        
+        // Store in localStorage
+        const existingDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]')
+        localStorage.setItem('syntexDocuments', JSON.stringify([...existingDocs, newDocument]))
+        
+        // Redirect to the document page
+        router.push(`/read/topics/${newDocId}`)
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error)
+      setError(error instanceof Error ? error.message : 'Error uploading document. Please try again.')
+    } finally {
+      setUploading(false)
+      setProcessing(false)
+      setProgress(0)
+      setStatus('')
+    }
   }
 
   return (
     <div className="container py-8">
       <div className="max-w-md mx-auto">
         <div className="mb-6">
-          <Link href="/math">
-            <Button variant="ghost" className="text-zinc-400 hover:text-white hover:bg-zinc-800 -ml-2">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Topics
-            </Button>
+          <Link
+            href={folderId ? `/read/folder/${folderId}` : "/read"}
+            className="inline-flex items-center text-zinc-400 hover:text-white"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
           </Link>
         </div>
 
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardHeader>
-            <CardTitle>Upload PDF</CardTitle>
-            <CardDescription className="text-zinc-400">
-              Upload a PDF to generate math questions from its content
-            </CardDescription>
-          </CardHeader>
-          <form onSubmit={handleSubmit}>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="pdf-upload" className="text-sm font-medium text-zinc-300">
-                  Select PDF
-                </Label>
-                <div className="border-2 border-dashed border-zinc-700 rounded-lg p-6 text-center hover:border-zinc-500 transition-colors">
-                  <Input id="pdf-upload" type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
-                  <label htmlFor="pdf-upload" className="flex flex-col items-center justify-center cursor-pointer">
-                    <Upload className="h-8 w-8 text-zinc-400 mb-2" />
-                    <span className="text-sm text-zinc-400">{file ? file.name : "Click to select a PDF file"}</span>
-                    {file && (
-                      <span className="text-xs text-zinc-500 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                    )}
-                  </label>
-                </div>
-              </div>
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
+          <h1 className="text-xl font-bold mb-4">Upload Document</h1>
 
-              <div className="space-y-2">
-                <Label htmlFor="topic" className="text-sm font-medium text-zinc-300">
-                  Topic Name
-                </Label>
-                <Input
-                  id="topic"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="e.g., Linear Algebra Lecture 1"
-                  className="bg-zinc-800 border-zinc-700 text-white"
-                  required
+          {error && (
+            <div className="bg-red-900/20 border border-red-900 rounded-md p-3 mb-4 flex items-start">
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 mr-2 flex-shrink-0" />
+              <p className="text-sm text-red-400">{error}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="pdf-upload" className="text-sm font-medium text-zinc-300">
+                Select PDF
+              </label>
+              <div className="border-2 border-dashed border-zinc-700 rounded-lg p-6 text-center hover:border-zinc-500 transition-colors">
+                <input 
+                  id="pdf-upload" 
+                  type="file" 
+                  accept=".pdf,application/pdf" 
+                  onChange={handleFileChange} 
+                  className="hidden" 
+                  disabled={uploading}
                 />
+                <label htmlFor="pdf-upload" className={`flex flex-col items-center justify-center ${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                  {uploading ? (
+                    <Loader2 className="h-10 w-10 text-blue-500 animate-spin mb-2" />
+                  ) : (
+                    <Upload className="h-10 w-10 text-zinc-500 mb-2" />
+                  )}
+                  <p className="text-sm text-zinc-400">
+                    {file ? file.name : 'Click to select or drag and drop PDF file'}
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Max file size: 10MB
+                  </p>
+                </label>
+                
+                {processing && (
+                  <div className="mt-4 space-y-2">
+                    <div className="w-full bg-zinc-800 rounded-full h-2.5">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${progress}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-zinc-400">{status}</p>
+                  </div>
+                )}
               </div>
-            </CardContent>
-            <CardFooter>
-              <Button
-                type="submit"
-                className="w-full bg-zinc-100 text-black hover:bg-white"
-                disabled={!file || !topic || uploading}
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="folder" className="text-sm font-medium text-zinc-300">
+                Select Folder
+              </label>
+              <select
+                id="folder"
+                value={folderId}
+                onChange={(e) => setFolderId(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white"
               >
-                {uploading ? "Processing..." : "Generate Questions"}
-              </Button>
-            </CardFooter>
+                <option value="">No folder</option>
+                {folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label htmlFor="flashcard-count" className="text-sm font-medium text-zinc-300">
+                  Number of Flashcards
+                </label>
+                <span className="text-sm font-medium text-zinc-400">{flashcardCount}</span>
+              </div>
+              <input
+                id="flashcard-count"
+                type="range"
+                min="3"
+                max="10"
+                value={flashcardCount}
+                onChange={(e) => setFlashcardCount(parseInt(e.target.value))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-zinc-500">
+                <span>3</span>
+                <span>10</span>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2 bg-zinc-100 text-black rounded-md hover:bg-white"
+              disabled={!file || uploading}
+            >
+              {uploading ? "Uploading..." : "Upload Document"}
+            </button>
           </form>
-        </Card>
+        </div>
       </div>
     </div>
   )

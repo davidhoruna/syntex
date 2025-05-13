@@ -207,24 +207,45 @@ export async function deleteTopic(id: string) {
 // ==================== DOCUMENT OPERATIONS ====================
 
 // Get all documents for the current user
-export async function getDocuments(folderId?: string) {
-  const userId = await getCurrentUserId()
-  if (!userId) return []
+export async function getDocuments(folderIntegerId?: string) { // Renamed param for clarity
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
 
-  let query = supabase.from("documents").select("*").eq("user_id", userId).order("created_at", { ascending: false })
+  let query = supabase
+    .from("documents")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
 
-  if (folderId) {
-    query = query.eq("folder_id", folderId)
+  if (folderIntegerId) {
+    // 1. Get the folder's UUID using the integer ID
+    const { data: folderData, error: folderError } = await supabase
+      .from("folders")
+      .select("id") // Select the uuid column from your folders table
+      .eq("id", folderIntegerId) // Filter by the integer id (convert string param to number)
+      .eq("user_id", userId) // Ensure user owns this folder
+      .single();
+
+    if (folderError || !folderData) {
+      console.error("Error fetching folder UUID or folder not found:", folderError);
+      return []; // Or handle as appropriate
+    }
+
+    const folderUuid = folderData.id;
+
+    // 2. Now use the fetched UUID to filter documents
+    // Assuming documents.folder_id is the UUID column
+    query = query.eq("folder_id", folderUuid);
   }
 
-  const { data, error } = await query
+  const { data, error } = await query;
 
   if (error) {
-    console.error("Error fetching documents:", error)
-    return []
+    console.error("Error fetching documents:", error);
+    return [];
   }
 
-  return data as Document[]
+  return data as Document[];
 }
 
 // Get a single document by ID
@@ -240,6 +261,33 @@ export async function getDocument(id: string) {
   }
 
   return data as Document
+}
+
+// Update a document (name, folder, etc)
+export async function updateDocument(id: string, updates: { name?: string; folder_id?: string }) {
+  const userId = await getCurrentUserId()
+  if (!userId) return null
+
+  // First check if the document belongs to the user
+  const document = await getDocument(id)
+  if (!document) return null
+
+  const { data, error } = await supabase
+    .from("documents")
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select()
+
+  if (error) {
+    console.error("Error updating document:", error)
+    return null
+  }
+
+  return data[0] as Document
 }
 
 // Upload a document

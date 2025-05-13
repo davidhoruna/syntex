@@ -1,87 +1,137 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import type React from "react"
+
+import { useEffect, useState, memo } from "react"
 import Link from "next/link"
-import { Folder, MoreVertical } from "lucide-react"
+import { Folder, MoreVertical, Plus } from "lucide-react"
+import { getFolders, createFolder, deleteFolder } from "@/lib/db-service"
+import type { Folder as FolderType } from "@/lib/supabase"
 
-// Define folders for the application
-const folders = [
-  { id: "1", name: "Research Papers" },
-  { id: "2", name: "Textbooks" },
-  { id: "3", name: "Articles" },
-  { id: "4", name: "Lecture Notes" },
-  { id: "5", name: "Personal" },
-]
-
-interface FolderWithCount {
-  id: string;
-  name: string;
-  documentCount: number;
-}
-
-export function ReadFolderGrid() {
-  const [foldersWithCounts, setFoldersWithCounts] = useState<FolderWithCount[]>([]);
+// Memoize the component to prevent unnecessary re-renders
+export const ReadFolderGrid = memo(function ReadFolderGrid() {
+  const [folders, setFolders] = useState<FolderType[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Get documents from localStorage
-    const getDocumentsFromStorage = () => {
+    async function loadFolders() {
       try {
-        if (typeof window !== 'undefined') {
-          const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
-          
-          // Count documents in each folder
-          const folderCounts: Record<string, number> = {};
-          storedDocs.forEach((doc: any) => {
-            if (doc.folderId) {
-              folderCounts[doc.folderId] = (folderCounts[doc.folderId] || 0) + 1;
-            }
-          });
-          
-          // Create folders with counts
-          const foldersWithData = folders.map(folder => ({
-            ...folder,
-            documentCount: folderCounts[folder.id] || 0
-          }));
-          
-          setFoldersWithCounts(foldersWithData);
-        }
-      } catch (error) {
-        console.error('Error getting documents from localStorage:', error);
-        setFoldersWithCounts(folders.map(folder => ({ ...folder, documentCount: 0 })));
+        setLoading(true)
+        const data = await getFolders("read")
+        setFolders(data)
+        setError(null)
+      } catch (err) {
+        console.error("Error loading folders:", err)
+        setError("Failed to load folders")
+      } finally {
+        setLoading(false)
       }
-    };
-    
-    getDocumentsFromStorage();
-    
-    // Update when localStorage changes
-    const handleStorageChange = () => {
-      getDocumentsFromStorage();
-    };
-    
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
+    }
+
+    loadFolders()
+  }, [])
+
+  const handleCreateFolder = async () => {
+    const name = prompt("Enter folder name:")
+    if (!name) return
+
+    try {
+      const newFolder = await createFolder(name, "read")
+      if (newFolder) {
+        setFolders((prev) => [...prev, newFolder])
+      }
+    } catch (err) {
+      console.error("Error creating folder:", err)
+      alert("Failed to create folder")
+    }
+  }
+
+  const handleDeleteFolder = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!confirm("Are you sure you want to delete this folder?")) return
+
+    try {
+      const success = await deleteFolder(id)
+      if (success) {
+        setFolders((prev) => prev.filter((folder) => folder.id !== id))
+      }
+    } catch (err) {
+      console.error("Error deleting folder:", err)
+      alert("Failed to delete folder")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="col-span-full">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400">
+          Loading folders...
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="col-span-full">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400">{error}</div>
+      </div>
+    )
+  }
 
   return (
     <>
-      {foldersWithCounts.map((folder) => (
-        <Link key={folder.id} href={`/read/folder/${folder.id}`}>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer h-full group">
-            <div className="flex items-start justify-between mb-2">
-              <div className="flex items-center">
-                <Folder className="h-5 w-5 mr-2 text-zinc-400 group-hover:text-white transition-colors" />
-                <h3 className="text-lg font-medium">{folder.name}</h3>
-              </div>
-              <button className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-zinc-700">
-                <MoreVertical className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="text-sm text-zinc-400">{folder.documentCount} documents</p>
-          </div>
-        </Link>
+      <div
+        className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer h-full flex flex-col items-center justify-center"
+        onClick={handleCreateFolder}
+      >
+        <Plus className="h-8 w-8 mb-2 text-zinc-400" />
+        <span className="text-zinc-400">New Folder</span>
+      </div>
+
+      {folders.map((folder) => (
+        <FolderItem key={folder.id} folder={folder} onDelete={handleDeleteFolder} />
       ))}
+
+      {folders.length === 0 && (
+        <div className="col-span-full">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400">
+            No folders yet. Create a new folder to get started.
+          </div>
+        </div>
+      )}
     </>
-  );
-}
+  )
+})
+
+// Extract folder item to its own component for better performance
+const FolderItem = memo(function FolderItem({
+  folder,
+  onDelete,
+}: {
+  folder: FolderType
+  onDelete: (id: string, e: React.MouseEvent) => void
+}) {
+  return (
+    <Link href={`/read/folder/${folder.id}`}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 hover:bg-zinc-800 transition-colors cursor-pointer h-full group">
+        <div className="flex items-start justify-between mb-2">
+          <div className="flex items-center">
+            <Folder className="h-5 w-5 mr-2 text-zinc-400 group-hover:text-white transition-colors" />
+            <h3 className="text-lg font-medium">{folder.name}</h3>
+          </div>
+          <button
+            className="text-zinc-400 hover:text-red-400 p-1 rounded-full hover:bg-zinc-700"
+            onClick={(e) => onDelete(folder.id, e)}
+            aria-label={`Delete ${folder.name}`}
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </Link>
+  )
+})

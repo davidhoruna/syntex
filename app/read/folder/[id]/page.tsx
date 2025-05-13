@@ -1,32 +1,57 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { ArrowLeft, Plus } from "lucide-react"
 import { DocumentList } from "@/components/read/document-list"
+import { getFolder } from "@/lib/db-service"
+import type { Folder } from "@/lib/supabase"
 
-// In a real app, this would come from a database
-const folders = {
-  "1": { id: "1", name: "Research Papers", documentCount: 5 },
-  "2": { id: "2", name: "Textbooks", documentCount: 3 },
-  "3": { id: "3", name: "Articles", documentCount: 7 },
-  "4": { id: "4", name: "Lecture Notes", documentCount: 4 },
-  "5": { id: "5", name: "Personal", documentCount: 2 },
-}
+export default function FolderPage({ params }: { params: { id: string } }) {
+  const [folder, setFolder] = useState<Folder | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-interface FolderPageProps {
-  params: Promise<{ id: string }> | { id: string }
-  searchParams: { [key: string]: string | string[] | undefined }
-}
+  useEffect(() => {
+    async function loadFolder() {
+      try {
+        setLoading(true)
+        const data = await getFolder(params.id)
+        setFolder(data)
+        setError(null)
+      } catch (err) {
+        console.error("Error loading folder:", err)
+        setError("Failed to load folder")
+      } finally {
+        setLoading(false)
+      }
+    }
 
-export default async function FolderPage({ params }: FolderPageProps) {
-  // Await params to access its properties
-  const resolvedParams = await params
-  // Get the folder ID from params
-  const folderId = Array.isArray(resolvedParams.id) ? resolvedParams.id[0] : resolvedParams.id
-  
-  // Get folder data
-  const folder = folders[folderId as keyof typeof folders] || {
-    id: folderId,
-    name: "Unknown Folder",
-    documentCount: 0,
+    loadFolder()
+  }, [params.id])
+
+  if (loading) {
+    return (
+      <div className="container py-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400">
+            Loading folder...
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !folder) {
+    return (
+      <div className="container py-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400">
+            {error || "Folder not found"}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -40,13 +65,13 @@ export default async function FolderPage({ params }: FolderPageProps) {
         </div>
 
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-medium">Documents</h2>
+          <h2 className="text-xl font-medium">Topics</h2>
           <Link
             href={`/read/upload?folder=${folder.id}`}
             className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 rounded-md hover:bg-zinc-700 text-sm"
           >
             <Plus className="h-4 w-4" />
-            <span>Upload Document</span>
+            <span>New Topic</span>
           </Link>
         </div>
 

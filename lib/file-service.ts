@@ -1,5 +1,4 @@
 import { supabase } from "./supabase"
-import { extractTextFromPDF } from "./pdf-utils"
 
 // Upload a file to Supabase Storage
 export async function uploadFile(file: File, bucket = "files") {
@@ -83,22 +82,4 @@ export async function deleteFile(path: string, bucket = "files") {
   }
 
   return true
-}
-
-// Extract text from a PDF file
-// This is a wrapper around the extractTextFromPDF function from pdf-utils
-// to maintain backward compatibility
-export async function extractTextFromPdf(file: File): Promise<string> {
-  // This function should only be called on the client side
-  if (typeof window === 'undefined') {
-    console.warn('extractTextFromPdf was called on the server side, which is not supported');
-    return '';
-  }
-  
-  try {
-    return await extractTextFromPDF(file, true);
-  } catch (error) {
-    console.error("Error extracting text from PDF:", error)
-    return ""
-  }
 }

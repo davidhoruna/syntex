@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect, memo } from "react"
 import Link from "next/link"
 import { ArrowLeft, ChevronLeft, ChevronRight, Play, Volume2, RotateCcw, Settings, Menu, X } from "lucide-react"
 import { getDocument, getDocumentUrl, getSummaries } from "@/lib/db-service"
-import { extractTextFromPDF } from "@/lib/pdf-utils"
+// PDF processing is handled by API routes
 
 // Remove all mock data
 const documentSummaries: Record<string, string[]> = {}
@@ -62,6 +62,8 @@ function DocumentViewer({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [extractedText, setExtractedText] = useState<string>('')
   const [generatingSummaries, setGeneratingSummaries] = useState(false)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [newFileName, setNewFileName] = useState('')
   
   // Handle clicking outside the flashcard
   useEffect(() => {
@@ -90,32 +92,87 @@ function DocumentViewer({
         const uploadedDoc = storedDocs.find((doc: any) => doc.id === documentId)
         
         if (uploadedDoc) {
-          // Use the uploaded document's summaries if available
-          if (uploadedDoc.summaries && uploadedDoc.summaries.length > 0) {
-            setSummaries(uploadedDoc.summaries)
-          } else if (uploadedDoc.extractedText) {
-            // If we have extracted text but no summaries, generate them on the fly
+          console.log('Document found in localStorage:', {
+            id: uploadedDoc.id,
+            name: uploadedDoc.name,
+            hasSummaries: !!uploadedDoc.summaries,
+            summariesLength: uploadedDoc.summaries?.length || 0,
+            hasExtractedText: !!uploadedDoc.extractedText,
+            extractedTextLength: uploadedDoc.extractedText?.length || 0
+          });
+          
+          // If we have extracted text, save it for possible regeneration
+          if (uploadedDoc.extractedText) {
+            setExtractedText(uploadedDoc.extractedText);
+          }
+          
+          // Try to load summaries from different sources
+          let summariesLoaded = false;
+          
+          // 1. First try: Check database for summaries
+          try {
+            const { getSummaries } = await import('@/lib/db-service');
+            const dbSummaries = await getSummaries(uploadedDoc.id);
+            
+            if (dbSummaries && dbSummaries.length > 0) {
+              console.log('Using summaries from database:', dbSummaries.length);
+              const summaryContents = dbSummaries.map(summary => summary.content);
+              setSummaries(summaryContents);
+              summariesLoaded = true;
+            }
+          } catch (dbError) {
+            console.error('Error loading summaries from database:', dbError);
+          }
+          
+          // 2. Second try: Check localStorage for summaries
+          if (!summariesLoaded && uploadedDoc.summaries && 
+              Array.isArray(uploadedDoc.summaries) && uploadedDoc.summaries.length > 0) {
+            console.log('Using summaries from localStorage:', uploadedDoc.summaries.length);
+            setSummaries(uploadedDoc.summaries);
+            summariesLoaded = true;
+          }
+          
+          // 3. Third try: Generate summaries from extracted text
+          if (!summariesLoaded && uploadedDoc.extractedText) {
             try {
-              setExtractedText(uploadedDoc.extractedText)
-              const { generateSummaries } = await import('@/lib/pdf-utils')
-              const generatedSummaries = await generateSummaries(uploadedDoc.extractedText, 5, true)
-              setSummaries(generatedSummaries)
+              console.log('Generating summaries from extracted text');
+              const response = await fetch('/api/pdf/summarize', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: uploadedDoc.extractedText,
+                  numSummaries: 5
+                }),
+              });
+              
+              if (response.ok) {
+                const data = await response.json();
+                if (data.success && data.summaries) {
+                  console.log('Successfully generated summaries:', data.summaries.length);
+                  setSummaries(data.summaries);
+                  summariesLoaded = true;
+                }
+              }
             } catch (error) {
-              console.error('Error generating summaries from extracted text:', error)
+              console.error('Error generating summaries from extracted text:', error);
             }
           }
           
           // Check if it's a local file
           if (uploadedDoc.isLocal && uploadedDoc.localUrl) {
-            setHasLocalFile(true)
+            setHasLocalFile(true);
           }
           
           // Update the document with any additional metadata
-          setDocumentData({
+          const docData = {
             ...defaultDocument,
             ...uploadedDoc,
             name: uploadedDoc.name || defaultDocument.name
-          })
+          };
+          setDocumentData(docData);
+          setNewFileName(docData.name); // Initialize rename field with current name
         }
       } catch (error) {
         console.error('Error loading document:', error)
@@ -127,23 +184,71 @@ function DocumentViewer({
     loadDocument()
   }, [documentId, defaultDocument])
   
-  // Function to regenerate summaries
-  const regenerateSummaries = useCallback(async () => {
-    if (!extractedText) return;
+  // Function to handle document rename
+  const handleSaveRename = async () => {
+    if (!newFileName.trim()) return;
     
     try {
-      setGeneratingSummaries(true);
-      const { generateSummaries } = await import('@/lib/pdf-utils');
-      const generatedSummaries = await generateSummaries(extractedText, flashcardCount, true);
-      setSummaries(generatedSummaries);
-      
-      // Save to localStorage
+      // Update in localStorage
       const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
       const docIndex = storedDocs.findIndex((doc: any) => doc.id === documentId);
       
-      if (docIndex >= 0) {
-        storedDocs[docIndex].summaries = generatedSummaries;
+      if (docIndex !== -1) {
+        storedDocs[docIndex].name = newFileName.trim();
         localStorage.setItem('syntexDocuments', JSON.stringify(storedDocs));
+      }
+      
+      // Update in database if possible
+      try {
+        const { updateDocument } = await import('@/lib/db-service');
+        if (updateDocument) {
+          await updateDocument(documentId, { name: newFileName.trim() });
+          console.log('Document renamed in database');
+        }
+      } catch (dbError) {
+        console.error('Error updating document name in database:', dbError);
+        // Continue anyway since we updated localStorage
+      }
+      
+      // Update local state
+      setDocumentData((prev: typeof defaultDocument) => ({ ...prev, name: newFileName.trim() }));
+      setIsRenaming(false);
+    } catch (error) {
+      console.error('Error renaming document:', error);
+    }
+  };
+
+  // Regenerate summaries manually
+  const regenerateSummaries = useCallback(async () => {
+    if (!extractedText || generatingSummaries) return;
+    
+    setGeneratingSummaries(true);
+    
+    try {
+      const response = await fetch('/api/pdf/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: extractedText,
+          numSummaries: flashcardCount
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.summaries) {
+          setSummaries(data.summaries);
+          // Update in localStorage
+          const storedDocs = JSON.parse(localStorage.getItem('syntexDocuments') || '[]');
+          const docIndex = storedDocs.findIndex((doc: any) => doc.id === documentId);
+          
+          if (docIndex !== -1) {
+            storedDocs[docIndex].summaries = data.summaries;
+            localStorage.setItem('syntexDocuments', JSON.stringify(storedDocs));
+          }
+        }
       }
     } catch (error) {
       console.error('Error regenerating summaries:', error);
@@ -244,9 +349,42 @@ function DocumentViewer({
             <ArrowLeft className="h-5 w-5" />
           </Link>
           
-          <h1 className="text-lg font-bold truncate px-2">
-            {documentData.name}
-          </h1>
+          {isRenaming ? (
+            <div className="flex-1 flex items-center gap-2 px-2">
+              <input
+                type="text"
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                className="flex-1 text-sm bg-zinc-800 border border-zinc-700 rounded px-2 py-1"
+                autoFocus
+              />
+              <button
+                onClick={handleSaveRename}
+                className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setIsRenaming(false);
+                  setNewFileName(documentData.name);
+                }}
+                className="px-2 py-1 bg-zinc-700 text-white text-xs rounded hover:bg-zinc-600"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center gap-2 px-2">
+              <h1 className="text-lg font-bold truncate">{documentData.name}</h1>
+              <button 
+                onClick={() => setIsRenaming(true)}
+                className="text-zinc-400 hover:text-white px-2 py-0.5 rounded hover:bg-zinc-800 text-xs"
+              >
+                Rename
+              </button>
+            </div>
+          )}
           
           <button
             className="text-zinc-400 hover:text-white p-1.5 rounded-full hover:bg-zinc-800"
@@ -282,9 +420,9 @@ function DocumentViewer({
             </button>
           </div>
         )}
-
+        
         {/* Desktop header */}
-        <div className="hidden md:flex items-center justify-between">
+        <div className="hidden md:flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-lg p-3">
           <div className="flex items-center gap-2">
             <Link
               href={documentData.folderId ? `/read/folder/${documentData.folderId}` : "/read"}
@@ -292,9 +430,46 @@ function DocumentViewer({
             >
               <ArrowLeft className="h-5 w-5" />
             </Link>
-            <h1 className="text-xl font-bold truncate">{documentData.name}</h1>
+            
+            {isRenaming ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 w-72"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveRename}
+                  className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setIsRenaming(false);
+                    setNewFileName(documentData.name);
+                  }}
+                  className="px-2 py-1 bg-zinc-700 text-white text-xs rounded hover:bg-zinc-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold">{documentData.name}</h1>
+                <button 
+                  onClick={() => setIsRenaming(true)}
+                  className="text-zinc-400 hover:text-white px-2 py-0.5 rounded hover:bg-zinc-800 text-xs"
+                >
+                  Rename
+                </button>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setShowSettings(!showSettings)}
               className="text-zinc-400 hover:text-white p-1.5 rounded-full hover:bg-zinc-800"
@@ -470,8 +645,15 @@ function DocumentViewer({
           </div>
         )}
         
+        {/* Debug summaries state */}
+        {isLoading && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center">
+            <p className="text-zinc-400">Loading document summaries...</p>
+          </div>
+        )}
+        
         {/* No summaries yet */}
-        {(!summaries || summaries.length === 0) && !isLoading && (
+        {(!summaries || !Array.isArray(summaries) || summaries.length === 0) && !isLoading && !showFlashcard && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 text-center">
             <p className="text-zinc-400 mb-4">No summaries available for this document yet.</p>
             <button
