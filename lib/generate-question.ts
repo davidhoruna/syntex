@@ -2,6 +2,8 @@
 
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
+import {google} from "@ai-sdk/google"
+
 
 // Helper function that attempts to robustly sanitize the JSON string
 function robustSanitizeJson(input: string): string {
@@ -88,9 +90,9 @@ Ensure the JSON is valid and can be parsed.
 `
 
     const { text } = await generateText({
-      model: openai("gpt-4o"),
+      model: google("gemini-2.0-flash"),
       prompt,
-      temperature: 0.7,
+      temperature: 0.2,
       maxTokens: 1000,
     })
 

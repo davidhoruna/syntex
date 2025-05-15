@@ -195,7 +195,6 @@ export default function LearnPage({ params }: { params: { topic: string } }) {
               >
                 <RefreshCw className="h-4 w-4" />
               </Button>
-              <LanguageToggle />
             </div>
           </div>
 

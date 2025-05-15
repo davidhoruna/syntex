@@ -6,7 +6,6 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { LanguageProvider } from "@/contexts/language-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { MainNav } from "@/components/main-nav"
-
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {

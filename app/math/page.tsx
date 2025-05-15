@@ -47,13 +47,17 @@ export default function MathPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Math</h1>
           <div className="flex gap-2">
+            
+            {/*
             <Link
               href="/math/upload"
               className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 rounded-md hover:bg-zinc-700 text-sm"
             >
+            
               <Upload className="h-4 w-4" />
               <span>Upload</span>
-            </Link>
+            </Link> */}
+            
             <button
               className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 rounded-md hover:bg-zinc-700 text-sm"
               onClick={handleCreateFolder}

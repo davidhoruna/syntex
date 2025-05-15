@@ -9,10 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^1.2.18",
     "@ai-sdk/openai": "latest",
     "@hookform/resolvers": "^3.9.1",
     "@langchain/community": "^0.3.42",
     "@langchain/core": "^0.3.55",
+    "@langchain/google-genai": "^0.2.9",
     "@langchain/openai": "^0.5.10",
     "@langchain/textsplitters": "^0.1.0",
     "@radix-ui/react-accordion": "1.2.2",
